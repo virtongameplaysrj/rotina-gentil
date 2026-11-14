@@ -9,7 +9,7 @@
 | `scheduler.js` | O "cérebro" que monta a agenda e calcula as barras de necessidades. |
 | `data.js` | Listas de sugestões (tarefas, áreas de lazer, frases). Dá para editar no Bloco de Notas. |
 | `styles.css` | Cores, tamanhos e aparência. |
-| `manifest.webmanifest`, `sw.js`, `icons/` | Fazem o app poder ser instalado no celular e funcionar sem internet. |
+| `manifest.webmanifest`, `sw.js`, `icon-*.png` | Fazem o app poder ser instalado no celular e funcionar sem internet. |
 | `tests.html` | Testes automáticos do cérebro da agenda. Abra para ver se está tudo ✔. |
 
 ---

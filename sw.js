@@ -1,7 +1,7 @@
 /* Faz o app funcionar sem internet depois da primeira abertura. */
 var CACHE = 'rotina-gentil-v1';
 var FILES = ['./', './index.html', './styles.css', './scheduler.js', './data.js', './app.js', './manifest.webmanifest',
-  './icons/icon-192.png', './icons/icon-512.png', './icons/icon-maskable-512.png'];
+  './icon-192.png', './icon-512.png', './icon-maskable-512.png'];
 
 self.addEventListener('install', function (e) {
   e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(FILES); }).then(function () { return self.skipWaiting(); }));
