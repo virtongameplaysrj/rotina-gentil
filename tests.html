@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Testes — Rotina Gentil</title>
+<style>
+  body { font-family: system-ui, sans-serif; background: #f6f4ef; color: #2b2d42; padding: 16px; }
+  .ok { color: #2e7d4f; } .fail { color: #b3261e; font-weight: bold; }
+  li { margin: 4px 0; }
+</style>
+</head>
+<body>
+<h1>Testes automáticos do motor de agenda</h1>
+<p id="summary">Rodando…</p>
+<ul id="out"></ul>
+<script src="scheduler.js"></script>
+<script>
+(function () {
+  var S = window.Scheduler, results = [];
+  function test(name, fn) {
+    try { fn(); results.push({ name: name, ok: true }); }
+    catch (e) { results.push({ name: name, ok: false, msg: e.message }); }
+  }
+  function eq(a, b, m) { if (a !== b) throw new Error((m || '') + ' esperado ' + JSON.stringify(b) + ', veio ' + JSON.stringify(a)); }
+  function ok(c, m) { if (!c) throw new Error(m || 'condição falsa'); }
+  function allItems(plan) { var r = []; plan.days.forEach(function (d, i) { d.forEach(function (it) { r.push(Object.assign({ day: i }, it)); }); }); return r; }
+  function noOverlap(plan) {
+    plan.days.forEach(function (d, i) {
+      var sorted = d.slice().sort(function (a, b) { return S.toMin(a.start) - S.toMin(b.start); });
+      for (var k = 1; k < sorted.length; k++) ok(S.toMin(sorted[k].start) >= S.toMin(sorted[k - 1].end), 'sobreposição no dia ' + i);
+    });
+  }
+  var everyEvening = {}; for (var d = 0; d < 7; d++) everyEvening[d] = [{ start: '19:00', end: '21:00' }];
+
+  test('conversão de horas', function () {
+    eq(S.toMin('07:30'), 450); eq(S.toHHMM(450), '07:30'); ok(isNaN(S.toMin('abc')));
+  });
+  test('semana começa na segunda', function () {
+    var ws = S.weekStart(new Date(2026, 10, 14)); // sábado 14/11/2026
+    eq(S.dateKey(ws), '2026-11-09'); eq(S.weekdayIndex(new Date(2026, 10, 15)), 6);
+  });
+  test('tarefa 7x por semana vai para todos os dias', function () {
+    var p = S.buildPlan({ slots: everyEvening, chores: [{ id: 'a', name: 'Louça', perWeek: 7, duration: 20, importance: 3 }], leisure: [] });
+    var days = allItems(p).map(function (i) { return i.day; }).sort();
+    eq(days.join(','), '0,1,2,3,4,5,6'); eq(p.unscheduled.length, 0);
+  });
+  test('tarefa 2x por semana fica espaçada (não em dias seguidos)', function () {
+    var p = S.buildPlan({ slots: everyEvening, chores: [{ id: 'a', name: 'Lixo', perWeek: 2, duration: 10, importance: 2 }], leisure: [] });
+    var days = allItems(p).map(function (i) { return i.day; });
+    eq(days.length, 2); ok(Math.abs(days[0] - days[1]) >= 3, 'dias: ' + days);
+  });
+  test('tarefa 3x por semana fica espaçada', function () {
+    var p = S.buildPlan({ slots: everyEvening, chores: [{ id: 'a', name: 'Cozinhar', perWeek: 3, duration: 30, importance: 3 }], leisure: [] });
+    var days = allItems(p).map(function (i) { return i.day; }).sort();
+    eq(days.length, 3);
+    for (var k = 1; k < days.length; k++) ok(days[k] - days[k - 1] >= 2, 'dias: ' + days);
+  });
+  test('nada se sobrepõe e tudo respeita os horários', function () {
+    var p = S.buildPlan({ slots: everyEvening, chores: [
+      { id: 'a', name: 'A', perWeek: 5, duration: 25, importance: 3 },
+      { id: 'b', name: 'B', perWeek: 3, duration: 40, importance: 2 },
+      { id: 'c', name: 'C', perWeek: 2, duration: 30, importance: 1 }],
+      leisure: [{ id: 'l', name: 'Jogo', perWeek: 4, duration: 45 }] });
+    noOverlap(p);
+    allItems(p).forEach(function (it) { ok(S.toMin(it.start) >= 19 * 60 && S.toMin(it.end) <= 21 * 60, it.taskId + ' fora do horário'); });
+  });
+  test('sem horário disponível = nada agendado, tudo listado como "não coube"', function () {
+    var p = S.buildPlan({ slots: {}, chores: [{ id: 'a', name: 'A', perWeek: 2, duration: 20, importance: 3 }], leisure: [] });
+    eq(allItems(p).length, 0); eq(p.unscheduled.length, 2);
+  });
+  test('quando falta tempo, a tarefa de baixa importância é a que sobra', function () {
+    var slots = { 0: [{ start: '10:00', end: '10:30' }] };
+    var p = S.buildPlan({ slots: slots, chores: [
+      { id: 'low', name: 'Baixa', perWeek: 1, duration: 25, importance: 1 },
+      { id: 'high', name: 'Alta', perWeek: 1, duration: 25, importance: 3 }], leisure: [] });
+    eq(allItems(p)[0].taskId, 'high'); eq(p.unscheduled[0].taskId, 'low');
+  });
+  test('lazer tem prioridade sobre tarefa média/baixa', function () {
+    var slots = { 0: [{ start: '10:00', end: '10:30' }] };
+    var p = S.buildPlan({ slots: slots, chores: [{ id: 'mid', name: 'Média', perWeek: 1, duration: 25, importance: 2 }],
+      leisure: [{ id: 'fun', name: 'Lazer', perWeek: 1, duration: 25 }] });
+    eq(allItems(p)[0].taskId, 'fun');
+  });
+  test('no mesmo horário: tarefa primeiro, lazer depois (recompensa)', function () {
+    var p = S.buildPlan({ slots: { 2: [{ start: '18:00', end: '20:00' }] },
+      chores: [{ id: 'c', name: 'Louça', perWeek: 1, duration: 20, importance: 1 }],
+      leisure: [{ id: 'l', name: 'Série', perWeek: 1, duration: 45 }] });
+    var d = p.days[2]; eq(d[0].taskId, 'c'); eq(d[1].taskId, 'l'); eq(d[0].start, '18:00'); eq(d[1].start, '18:25');
+  });
+  test('limite de tarefas domésticas por dia é respeitado', function () {
+    var chores = []; for (var i = 0; i < 6; i++) chores.push({ id: 'c' + i, name: 'C' + i, perWeek: 1, duration: 10, importance: 2 });
+    var p = S.buildPlan({ slots: { 0: [{ start: '08:00', end: '12:00' }] }, chores: chores, leisure: [], maxChoresPerDay: 2 });
+    eq(p.days[0].length, 2); eq(p.unscheduled.length, 4);
+  });
+  test('mesma entrada gera sempre a mesma agenda (previsível)', function () {
+    var cfg = { slots: everyEvening, chores: [{ id: 'a', name: 'A', perWeek: 3, duration: 20, importance: 2 }, { id: 'b', name: 'B', perWeek: 2, duration: 30, importance: 3 }], leisure: [{ id: 'l', name: 'L', perWeek: 2, duration: 30 }] };
+    eq(JSON.stringify(S.buildPlan(cfg)), JSON.stringify(S.buildPlan(cfg)));
+  });
+  test('horário inválido (fim antes do início) é ignorado', function () {
+    var p = S.buildPlan({ slots: { 0: [{ start: '20:00', end: '19:00' }] }, chores: [{ id: 'a', name: 'A', perWeek: 1, duration: 10, importance: 2 }], leisure: [] });
+    eq(p.unscheduled.length, 1);
+  });
+  test('necessidades: começa em ~80% e cai sem atividade', function () {
+    var now = Date.now(), chores = [{ id: 'a', need: 'ambiente', perWeek: 2, importance: 2 }];
+    var n0 = S.computeNeeds({ chores: chores, leisure: [], completions: [], seedTs: now }, now);
+    eq(n0.ambiente, 80);
+    var n5 = S.computeNeeds({ chores: chores, leisure: [], completions: [], seedTs: now }, now + 5 * 86400000);
+    ok(n5.ambiente < 50, 'valor ' + n5.ambiente);
+  });
+  test('necessidades: concluir tarefas enche a barra (máx. 100)', function () {
+    var now = Date.now(), chores = [{ id: 'a', need: 'ambiente', perWeek: 1, importance: 2 }];
+    var seed = now - 30 * 86400000;
+    var empty = S.computeNeeds({ chores: chores, leisure: [], completions: [], seedTs: seed }, now);
+    eq(empty.ambiente, 0);
+    var full = S.computeNeeds({ chores: chores, leisure: [], seedTs: seed, completions: [{ need: 'ambiente', weight: 2, ts: now }] }, now);
+    eq(full.ambiente, 100);
+  });
+  test('necessidades: quem segue a agenda fica acima de 45%', function () {
+    var day = 86400000, start = Date.now() - 60 * day, chores = [{ id: 'a', need: 'ambiente', perWeek: 1, importance: 3 }], comps = [];
+    for (var t = start; t < start + 60 * day; t += 7 * day) comps.push({ need: 'ambiente', weight: 3, ts: t });
+    var min = 100;
+    for (var now = start + 14 * day; now < start + 56 * day; now += day / 4) {
+      var c = comps.filter(function (x) { return x.ts <= now; });
+      min = Math.min(min, S.computeNeeds({ chores: chores, leisure: [], completions: c, seedTs: start }, now).ambiente);
+    }
+    ok(min >= 45, 'mínimo ' + min);
+  });
+  test('relatório de capacidade soma minutos', function () {
+    var r = S.capacityReport({ slots: { 0: [{ start: '19:00', end: '20:00' }] }, chores: [{ duration: 20, perWeek: 2 }], leisure: [{ duration: 30, perWeek: 1 }], buffer: 5 });
+    eq(r.available, 60); eq(r.chores, 50); eq(r.leisure, 35);
+  });
+
+  var out = document.getElementById('out'), fails = 0;
+  results.forEach(function (r) {
+    var li = document.createElement('li');
+    li.className = r.ok ? 'ok' : 'fail';
+    li.textContent = (r.ok ? '✔ ' : '✘ ') + r.name + (r.ok ? '' : ' — ' + r.msg);
+    if (!r.ok) fails++;
+    out.appendChild(li);
+  });
+  document.getElementById('summary').textContent = fails ? fails + ' teste(s) falharam de ' + results.length : 'Todos os ' + results.length + ' testes passaram ✔';
+  window.__testResults = { total: results.length, fails: fails, results: results };
+})();
+</script>
+</body>
+</html>
