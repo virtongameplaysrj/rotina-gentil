@@ -13,6 +13,8 @@
   --accent-soft: #d6e8e6;
   --leisure: #6a4c93;
   --leisure-soft: #e7def3;
+  --exercise: #c9733a;
+  --exercise-soft: #f6e2d3;
   --good: #4f9a62;
   --mid: #d9a631;
   --low: #d9775a;
@@ -33,6 +35,8 @@
   --accent-soft: #2c4847;
   --leisure: #c5a8ec;
   --leisure-soft: #3b3150;
+  --exercise: #e8a070;
+  --exercise-soft: #4a3326;
   --good: #79c48b;
   --mid: #e6c062;
   --low: #e99a80;
@@ -202,6 +206,57 @@ nav.tabs button[aria-current="page"] { background: var(--accent-soft); color: va
 .meter i { display: block; height: 100%; }
 .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: .85rem; margin-top: 6px; }
 .legend span::before { content: ''; display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; background: var(--c); }
+
+/* ---------- atividade física ---------- */
+.now.exercise { border-color: var(--exercise); }
+.now.exercise .tag { background: var(--exercise-soft); }
+.item.exercise .dot { background: var(--exercise); }
+.task-edit.exercise { border-left: 6px solid var(--exercise); }
+.task-edit.leisure { border-left: 6px solid var(--leisure); }
+.task-edit.chore { border-left: 6px solid var(--accent); }
+.card.install { border: 2px dashed var(--accent); }
+.card.monthly { border-left: 6px solid var(--mid); }
+
+/* opções de jogos/atividades ("quais?") */
+.optchip { display: inline-flex; align-items: center; gap: 4px; background: var(--leisure-soft); border-radius: 999px; padding: 4px 4px 4px 12px; font-weight: 600; }
+.optchip button { min-height: 36px; min-width: 36px; padding: 0; background: transparent; border-radius: 50%; }
+
+/* velocímetro da análise */
+.gauge { width: 100%; max-width: 280px; display: block; margin: 4px auto 0; }
+.gauge-labels { display: flex; justify-content: space-between; max-width: 300px; margin: 0 auto; font-size: .8rem; color: var(--muted); font-weight: 600; }
+
+/* ---------- painel de necessidades (estilo simulador de vida) ---------- */
+.simpanel {
+  display: flex; gap: 10px; margin: 12px 0 0; padding: 10px 12px 12px 8px;
+  background: linear-gradient(180deg, #5d6f9e 0%, #475886 100%);
+  border: 3px solid #2f3b62; border-radius: 18px;
+  box-shadow: inset 0 2px 0 rgba(255,255,255,.25), 0 3px 8px rgba(0,0,0,.18);
+  color: #fff;
+}
+.sp-mood { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 34px; flex: none; }
+.sp-gem { font-size: 1.3rem; line-height: 1; }
+.sp-vbar {
+  position: relative; display: block; flex: 1; width: 16px; min-height: 90px; border-radius: 8px;
+  background: #27304f; border: 2px solid #1c2340; overflow: hidden;
+}
+.sp-vbar i { position: absolute; left: 0; right: 0; display: block; }
+.sp-vbar .vmid { position: absolute; left: 0; right: 0; top: 50%; height: 2px; background: rgba(255,255,255,.35); }
+.sp-body { flex: 1; min-width: 0; }
+.sp-title { text-align: center; font-weight: 700; letter-spacing: .03em; text-shadow: 0 1px 0 #1c2340; margin-bottom: 4px; }
+.sp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px; }
+.sp-need { display: block; width: 100%; background: none; border: none; padding: 0; min-height: 0; color: #fff; font-weight: 700; text-align: center; }
+.sp-lbl { display: block; font-size: .85rem; text-shadow: 0 1px 0 #1c2340; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.simbar {
+  position: relative; display: block; height: 14px; border-radius: 7px; margin-top: 2px;
+  background: #27304f; border: 2px solid #1c2340; overflow: hidden;
+}
+.simbar i { position: absolute; top: 0; bottom: 0; display: block; transition: left .8s ease, width .8s ease; }
+.simbar .mid { position: absolute; top: 0; bottom: 0; left: 50%; width: 2px; background: rgba(255,255,255,.35); }
+.card .simbar { background: var(--surface-2); border-color: var(--line); height: 18px; border-radius: 9px; }
+.sb-green  { background: linear-gradient(180deg, #b9f27c 0%, #5dbb2f 55%, #3f9a1f 100%); }
+.sb-lime   { background: linear-gradient(180deg, #e2f28a 0%, #a9c93a 55%, #86a923 100%); }
+.sb-orange { background: linear-gradient(180deg, #ffd08a 0%, #f39a2e 55%, #d97a14 100%); }
+.sb-red    { background: linear-gradient(180deg, #ff9b8a 0%, #e5432d 55%, #c22a17 100%); }
 
 @media (max-width: 380px) {
   .needs { gap: 8px 10px; }

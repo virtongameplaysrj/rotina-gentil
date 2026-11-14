@@ -1,52 +1,74 @@
-/* Catálogos: necessidades, sugestões de tarefas domésticas e áreas de lazer. */
+/* Catálogos: necessidades, sugestões de tarefas da casa, atividade física e áreas de lazer. */
 window.CATALOG = {
   needs: {
-    higiene:     { label: 'Higiene',     icon: '🫧', hint: 'Banheiro, roupa de cama e cuidados com o corpo.' },
-    ambiente:    { label: 'Casa',        icon: '🏠', hint: 'Casa limpa e organizada: louça, lixo, chão.' },
     alimentacao: { label: 'Alimentação', icon: '🍲', hint: 'Comida pronta e geladeira abastecida.' },
+    ambiente:    { label: 'Ambiente',    icon: '🏠', hint: 'Casa limpa e organizada: louça, lixo, chão.' },
+    higiene:     { label: 'Higiene',     icon: '🫧', hint: 'Banheiro, roupa de cama e cuidados com o corpo.' },
     roupas:      { label: 'Roupas',      icon: '👕', hint: 'Roupa limpa e guardada.' },
+    corpo:       { label: 'Corpo',       icon: '🏃', hint: 'Atividade física: mexer o corpo do seu jeito.' },
     diversao:    { label: 'Diversão',    icon: '🎈', hint: 'Coisas que você faz só porque gosta.' },
     social:      { label: 'Social',      icon: '💬', hint: 'Contato com pessoas, no seu ritmo.' },
-    energia:     { label: 'Energia',     icon: '🔋', hint: 'Descanso, corpo e recarregar as baterias.' }
+    energia:     { label: 'Energia',     icon: '🔋', hint: 'Descanso, natureza e recarregar as baterias.' }
   },
   choreNeeds: ['ambiente', 'higiene', 'alimentacao', 'roupas'],
   leisureNeeds: ['diversao', 'social', 'energia'],
 
+  // [nome, necessidade, minutos, vezes, unidade ('week' | 'month'), importância 1-3]
   chores: [
-    { name: 'Lavar a louça', need: 'ambiente', duration: 20, perWeek: 5, importance: 3, firstStep: 'Coloque uma música e abra a torneira.' },
-    { name: 'Cozinhar / preparar refeições', need: 'alimentacao', duration: 40, perWeek: 3, importance: 3, firstStep: 'Coloque uma panela em cima do fogão.' },
-    { name: 'Fazer compras (mercado)', need: 'alimentacao', duration: 60, perWeek: 1, importance: 3, firstStep: 'Abra a geladeira e anote 3 coisas que faltam.' },
-    { name: 'Lavar roupa', need: 'roupas', duration: 20, perWeek: 2, importance: 3, firstStep: 'Leve só o cesto de roupa até a máquina.' },
-    { name: 'Estender e dobrar roupa', need: 'roupas', duration: 20, perWeek: 2, importance: 2, firstStep: 'Pegue só 5 peças.' },
-    { name: 'Tirar o lixo', need: 'ambiente', duration: 10, perWeek: 2, importance: 2, firstStep: 'Pegue um saco de lixo novo.' },
-    { name: 'Varrer ou aspirar', need: 'ambiente', duration: 25, perWeek: 2, importance: 2, firstStep: 'Pegue a vassoura e comece pelo cômodo onde você está.' },
-    { name: 'Limpar o banheiro', need: 'higiene', duration: 30, perWeek: 1, importance: 2, firstStep: 'Borrife o produto na pia e espere 2 minutos.' },
-    { name: 'Trocar roupa de cama', need: 'higiene', duration: 20, perWeek: 1, importance: 1, firstStep: 'Tire só a fronha do travesseiro.' },
-    { name: 'Organizar o quarto', need: 'ambiente', duration: 20, perWeek: 1, importance: 1, firstStep: 'Guarde 5 objetos que estão fora do lugar.' },
-    { name: 'Limpar a geladeira', need: 'alimentacao', duration: 20, perWeek: 1, importance: 1, firstStep: 'Jogue fora 1 coisa vencida.' },
-    { name: 'Organizar papéis e contas', need: 'ambiente', duration: 20, perWeek: 1, importance: 2, firstStep: 'Junte os papéis em uma pilha só.' },
-    { name: 'Regar as plantas', need: 'ambiente', duration: 5, perWeek: 2, importance: 1, firstStep: 'Encha o regador.' }
+    ['Lavar a louça', 'ambiente', 20, 5, 'week', 3],
+    ['Cozinhar / preparar refeições', 'alimentacao', 40, 3, 'week', 3],
+    ['Fazer compras (mercado)', 'alimentacao', 60, 1, 'week', 3],
+    ['Lavar roupa', 'roupas', 20, 2, 'week', 3],
+    ['Estender e dobrar roupa', 'roupas', 20, 2, 'week', 2],
+    ['Tirar o lixo', 'ambiente', 10, 2, 'week', 2],
+    ['Varrer ou aspirar', 'ambiente', 25, 2, 'week', 2],
+    ['Limpar o banheiro', 'higiene', 30, 1, 'week', 2],
+    ['Trocar roupa de cama', 'higiene', 20, 2, 'month', 2],
+    ['Organizar o quarto', 'ambiente', 20, 1, 'week', 1],
+    ['Regar as plantas', 'ambiente', 5, 2, 'week', 1],
+    ['Limpar a geladeira', 'alimentacao', 25, 1, 'month', 2],
+    ['Pagar contas / organizar papéis', 'ambiente', 20, 1, 'month', 3],
+    ['Limpar janelas e vidros', 'ambiente', 30, 1, 'month', 1],
+    ['Lavar tapetes e cortinas', 'ambiente', 40, 1, 'month', 1],
+    ['Limpar o fogão e o forno', 'alimentacao', 30, 1, 'month', 2],
+    ['Trocar toalhas', 'higiene', 10, 3, 'month', 2]
   ],
 
+  // Atividade física (etapa opcional)
+  exercise: [
+    ['Caminhada', 30, 3, 'week'],
+    ['Academia / musculação', 60, 3, 'week'],
+    ['Corrida', 30, 2, 'week'],
+    ['Alongamento ou yoga', 20, 3, 'week'],
+    ['Treino em casa', 25, 2, 'week'],
+    ['Bicicleta', 45, 2, 'week'],
+    ['Natação', 45, 2, 'week'],
+    ['Dança', 30, 1, 'week'],
+    ['Esporte coletivo (futebol, vôlei…)', 90, 1, 'week'],
+    ['Trilha / caminhada longa', 180, 1, 'month']
+  ],
+
+  // Áreas de lazer. Ideias: [nome, minutos, dica para a lista "quais?"]
   leisureAreas: {
+    jogos: { label: 'Jogos', icon: '🎮', need: 'diversao', desc: 'Videogame, celular, tabuleiro, cartas. Cadastre os jogos que você curte e o app escolhe por você.',
+      ideas: [['Videogame (console ou PC)', 60, 'Ex.: Stardew Valley, Minecraft'], ['Jogo de celular', 30, 'Ex.: palavras cruzadas, sudoku'],
+        ['Jogo de tabuleiro ou cartas', 45, 'Ex.: Uno, xadrez'], ['Jogo online com amigos', 60, 'Ex.: o jogo do grupo'],
+        ['Jogo de lógica / quebra-cabeça', 30, 'Ex.: quebra-cabeça de 500 peças']] },
+    telas: { label: 'Séries e filmes', icon: '🎬', need: 'diversao', desc: 'O que você está assistindo agora. O app escolhe a vez de cada um.',
+      ideas: [['Assistir série ou anime', 45, 'Ex.: nome das séries'], ['Assistir um filme', 120, 'Ex.: filmes da sua lista'], ['Vídeos do meu canal favorito', 30, 'Ex.: nome dos canais']] },
     interesse: { label: 'Interesse especial', icon: '🌟', need: 'diversao', desc: 'Seu hiperfoco ou assunto favorito. Tempo para ele sem culpa.',
-      ideas: [['Tempo livre no meu interesse especial', 60, 'Abra o material do seu interesse.'], ['Ler um livro', 30, 'Pegue o livro e leia 1 página.'], ['Ver um documentário', 50, 'Escolha o documentário agora e deixe pronto.']] },
+      ideas: [['Tempo no meu interesse especial', 60, 'Ex.: aviões, dinossauros'], ['Ler um livro', 30, 'Ex.: livros que está lendo'], ['Ver um documentário', 50, 'Ex.: temas']] },
     criativo: { label: 'Criatividade', icon: '🎨', need: 'diversao', desc: 'Criar com as mãos, sons ou palavras.',
-      ideas: [['Desenhar ou pintar', 30, 'Separe um papel e um lápis.'], ['Tocar um instrumento', 30, 'Pegue o instrumento e afine.'], ['Escrever', 20, 'Escreva uma frase qualquer.'], ['Artesanato', 40, 'Separe o material na mesa.']] },
-    jogos: { label: 'Jogos e telas', icon: '🎮', need: 'diversao', desc: 'Videogame, séries, filmes, jogos de tabuleiro.',
-      ideas: [['Jogar videogame', 60, 'Ligue o console ou abra o jogo.'], ['Assistir um episódio', 45, 'Escolha o episódio e sente no sofá.'], ['Quebra-cabeça ou jogo de tabuleiro', 45, 'Abra a caixa.']] },
+      ideas: [['Desenhar ou pintar', 30, ''], ['Tocar um instrumento', 30, 'Ex.: violão'], ['Escrever', 20, ''], ['Artesanato', 40, 'Ex.: crochê']] },
     social: { label: 'Social', icon: '💬', need: 'social', desc: 'Contato com pessoas — pode ser por mensagem, no seu ritmo.',
-      ideas: [['Mandar mensagem ou áudio para alguém', 15, 'Abra a conversa com a pessoa.'], ['Encontrar um amigo', 90, 'Mande: “bora se ver essa semana?”'], ['Jogar online com amigos', 60, 'Avise no grupo que vai entrar.']] },
-    movimento: { label: 'Movimento', icon: '🚶', need: 'energia', desc: 'Mexer o corpo de um jeito gostoso.',
-      ideas: [['Caminhada', 30, 'Calce o tênis.'], ['Dançar algumas músicas', 10, 'Coloque sua música favorita.'], ['Alongamento', 15, 'Estique os braços para cima.'], ['Andar de bicicleta', 40, 'Encha o pneu da bicicleta.']] },
+      ideas: [['Mandar mensagem ou áudio para alguém', 15, 'Ex.: nomes das pessoas'], ['Encontrar um amigo', 90, 'Ex.: nomes'], ['Ligar para a família', 20, 'Ex.: mãe, irmão']] },
     descanso: { label: 'Descanso', icon: '🛋️', need: 'energia', desc: 'Recarregar: silêncio, conforto, calma.',
-      ideas: [['Banho relaxante', 20, 'Separe a toalha.'], ['Ouvir um álbum inteiro', 40, 'Coloque os fones.'], ['Respiração ou meditação', 10, 'Sente e feche os olhos.'], ['Cochilo', 20, 'Coloque um alarme de 20 minutos.']] },
+      ideas: [['Banho relaxante', 20, ''], ['Ouvir um álbum inteiro', 40, 'Ex.: álbuns favoritos'], ['Respiração ou meditação', 10, ''], ['Cochilo', 20, '']] },
     natureza: { label: 'Natureza', icon: '🌳', need: 'energia', desc: 'Ar livre, sol, plantas e bichos.',
-      ideas: [['Ir a um parque', 60, 'Coloque uma garrafa de água na bolsa.'], ['Tomar sol', 15, 'Abra a janela ou vá até a porta.'], ['Brincar com o pet', 20, 'Pegue o brinquedo dele.']] }
+      ideas: [['Ir a um parque', 60, 'Ex.: nomes dos parques'], ['Tomar sol', 15, ''], ['Brincar com o pet', 20, '']] }
   },
 
   weekdays: ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo'],
-  weekdaysShort: ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'],
 
   kindWords: [
     'Feito! Você começou, e começar é a parte mais difícil.',

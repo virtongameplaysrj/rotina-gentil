@@ -131,6 +131,52 @@
     eq(r.available, 60); eq(r.chores, 50); eq(r.leisure, 35);
   });
 
+  // ---------- tarefas mensais ----------
+  function weeksOfYear() { var r = [], w = S.weekStart(new Date(2026, 0, 1)); for (var i = 0; i < 53; i++) r.push(S.addDays(w, 7 * i)); return r; }
+  test('tarefa 1x/mês aparece em exatamente 1 semana de cada mês', function () {
+    var t = { id: 'geladeira', name: 'Geladeira', unit: 'month', perMonth: 1 }, byMonth = {};
+    weeksOfYear().forEach(function (w) { if (S.isDueWeek(t, w)) { var m = S.monthWeekOf(w).month; byMonth[m] = (byMonth[m] || 0) + 1; } });
+    for (var m = 0; m < 12; m++) eq(byMonth[m], 1, 'mês ' + m);
+  });
+  test('tarefa 2x/mês fica espaçada (semanas 1 e 3, ou 2 e 4)', function () {
+    [ 'a', 'b', 'c', 'zz' ].forEach(function (id) { var w = S.dueWeekIdx(2, id); eq(w[1] - w[0], 2, id); });
+  });
+  test('tarefa 3x/mês cai em 3 semanas diferentes', function () {
+    var w = S.dueWeekIdx(3, 'x'); eq(w.length, 3); eq(new Set(w).size, 3);
+  });
+  test('tarefa do mês esquecida volta na semana seguinte', function () {
+    var t = { id: 'geladeira', name: 'Geladeira', unit: 'month', perMonth: 1, importance: 1 };
+    var due = weeksOfYear().filter(function (w) { return S.isDueWeek(t, w) && S.monthWeekOf(w).idx < 3; })[0];
+    var next = S.addDays(due, 7);
+    eq(S.tasksForWeek([t], due, []).length, 1, 'semana dela');
+    var carried = S.tasksForWeek([t], next, []);
+    eq(carried.length, 1, 'semana seguinte sem fazer'); ok(carried[0].overdue, 'marcada como atrasada');
+    eq(S.tasksForWeek([t], next, [{ taskId: 'geladeira', ts: due.getTime() + 86400000 }]).length, 0, 'se fez, não volta');
+  });
+  test('tarefa do mês ganha prioridade alta mesmo se a importância for baixa', function () {
+    var t = { id: 'g', name: 'G', unit: 'month', perMonth: 1, importance: 1 };
+    var w = weeksOfYear().filter(function (x) { return S.isDueWeek(t, x); })[0];
+    ok(S.tasksForWeek([t], w, [])[0].priority > S.LEISURE_PRIORITY);
+  });
+  // ---------- atividade física ----------
+  test('ordem no mesmo horário: casa → atividade física → lazer', function () {
+    var p = S.buildPlan({ slots: { 0: [{ start: '18:00', end: '21:00' }] },
+      chores: [{ id: 'c', name: 'Louça', perWeek: 1, duration: 20, importance: 1 }],
+      exercise: [{ id: 'e', name: 'Caminhada', perWeek: 1, duration: 30, importance: 2 }],
+      leisure: [{ id: 'l', name: 'Série', perWeek: 1, duration: 45 }] });
+    eq(p.days[0].map(function (i) { return i.kind; }).join(','), 'chore,exercise,leisure');
+  });
+  test('atividades físicas diferentes não caem no mesmo dia se houver espaço', function () {
+    var p = S.buildPlan({ slots: everyEvening, chores: [], leisure: [],
+      exercise: [{ id: 'a', name: 'Academia', perWeek: 3, duration: 60, importance: 2 }, { id: 'b', name: 'Yoga', perWeek: 3, duration: 20, importance: 2 }] });
+    p.days.forEach(function (d, i) { ok(d.filter(function (x) { return x.kind === 'exercise'; }).length <= 1, 'dia ' + i); });
+  });
+  test('necessidade de tarefa mensal não zera logo depois de feita', function () {
+    var now = Date.now(), t = { id: 'm', need: 'ambiente', unit: 'month', perMonth: 1, importance: 2 };
+    var v = S.computeNeeds({ chores: [t], completions: [{ need: 'ambiente', weight: 2, window: 35, ts: now - 14 * 86400000 }], seedTs: now - 60 * 86400000 }, now);
+    ok(v.ambiente >= 100, 'após 2 semanas: ' + v.ambiente);
+  });
+
   var out = document.getElementById('out'), fails = 0;
   results.forEach(function (r) {
     var li = document.createElement('li');
