@@ -217,6 +217,11 @@ nav.tabs button[aria-current="page"] { background: var(--accent-soft); color: va
 .card.install { border: 2px dashed var(--accent); }
 .card.monthly { border-left: 6px solid var(--mid); }
 
+/* check-in de energia */
+.checkin .seg button { min-height: 68px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; }
+.checkin .emo { font-size: 1.5rem; line-height: 1; }
+.sheet ul { margin: 4px 0 10px; padding-left: 22px; }
+
 /* opções de jogos/atividades ("quais?") */
 .optchip { display: inline-flex; align-items: center; gap: 4px; background: var(--leisure-soft); border-radius: 999px; padding: 4px 4px 4px 12px; font-weight: 600; }
 .optchip button { min-height: 36px; min-width: 36px; padding: 0; background: transparent; border-radius: 50%; }

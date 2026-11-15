@@ -8,12 +8,35 @@
   var DAY = 86400000;
 
   // Equilíbrio do lazer, em % do tempo planejado na semana (usado no velocímetro da análise).
-  // TODO(human): ajuste o que é "pouco", "equilibrado" e "muito" lazer para você.
+  // Ajuste à vontade o que é "pouco", "equilibrado" e "muito" lazer.
   var BALANCE = {
     low: 20,   // abaixo disso: "Pouco lazer"
     high: 45,  // acima disso: "Muito lazer"
     max: 70    // fim do velocímetro
   };
+
+  /**
+   * "Modo dia difícil": decide se uma atividade de HOJE fica no dia (true) ou vai para outro dia (false).
+   * O lazer é tratado à parte: o primeiro lazer do dia sempre fica, porque recarregar é essencial.
+   * item: { kind: 'chore' | 'exercise', monthly: true/false, overdue: true/false }
+   * task: { name, importance: 1 | 2 | 3, duration (min), unit: 'week' | 'month' }
+   */
+  function keepOnHardDay(item, task) {
+    // TODO(human): decida o que é essencial num dia difícil.
+    if (item.monthly) return true;      // tarefas do mês são as mais esquecidas
+    return task.importance === 3;       // só o que você marcou como importância alta
+  }
+
+  // Começo rápido: opções prontas para montar a semana em ~2 minutos
+  var QUICK_SLOTS = [
+    ['Noites de seg a sex (19h–20h30)', '19:00', '20:30', [0, 1, 2, 3, 4]],
+    ['Manhãs de seg a sex (7h–8h)', '07:00', '08:00', [0, 1, 2, 3, 4]],
+    ['Sábado e domingo de manhã (9h–11h)', '09:00', '11:00', [5, 6]],
+    ['Sábado e domingo à tarde (14h–16h)', '14:00', '16:00', [5, 6]]
+  ];
+  var QUICK_CHORES = [0, 1, 2, 3, 5, 6, 7, 8]; // posições em CATALOG.chores
+  var QUICK_LEISURE = [['jogos', 0], ['telas', 0], ['interesse', 0], ['social', 0], ['descanso', 1], ['natureza', 0], ['criativo', 0]];
+  var SHORT_DAYS = ['seg', 'ter', 'qua', 'qui', 'sex', 'sáb', 'dom'];
 
   // ---------------- estado ----------------
   function emptySlots() { var s = {}; for (var d = 0; d < 7; d++) s[d] = []; return s; }
@@ -22,7 +45,7 @@
       v: 2, onboarded: false, step: 0,
       prefs: { scale: 1, theme: 'light', motion: 'normal', showWholeDay: false, maxChores: 3, buffer: 5 },
       slots: emptySlots(), chores: [], exercise: [], areas: {}, leisure: [], completions: [], plans: {},
-      seedTs: null, meta: {}
+      seedTs: null, meta: {}, energy: []
     };
   }
   function migrate(s) {
@@ -58,7 +81,8 @@
     try { localStorage.setItem(KEY, JSON.stringify(S)); storageOk = true; }
     catch (e) { storageOk = false; }
   }
-  var ui = { view: 'today', edit: null, modal: null, focus: null, toast: null, weekOffset: 0, installEvt: null, prompted: false };
+  var ui = { view: 'today', edit: null, modal: null, focus: null, toast: null, weekOffset: 0, installEvt: null, prompted: false,
+    quick: { slots: {}, chores: {}, leisure: {} }, energyAsk: false, hardUndo: null };
 
   // ---------------- utilidades ----------------
   function h(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
@@ -105,15 +129,23 @@
     };
   }
   function weekKeyFor(date) { return Sch.dateKey(Sch.weekStart(date)); }
-  function buildWeek(wk) {
+  /** Status que a atividade já tinha neste dia (feita ou pulada), para não perder ao refazer a agenda. */
+  function priorStatus(oldDay, dk, kind, taskId) {
+    if (S.completions.some(function (c) { return c.date === dk && c.taskId === taskId && c.kind === kind; })) return 'done';
+    if ((oldDay || []).some(function (o) { return o.kind === kind && o.taskId === taskId && o.status === 'skipped'; })) return 'skipped';
+    return 'pending';
+  }
+  /** opts.old + opts.keepBefore: mantém intactos os dias que já passaram. */
+  function buildWeek(wk, opts) {
     var start = Sch.parseKey(wk);
     var tpl = Sch.buildPlan(planCfg(start));
     var weekSerial = Math.round(start.getTime() / (7 * DAY)), counters = {};
     var plan = { createdAt: Date.now(), unscheduled: tpl.unscheduled, days: tpl.days.map(function (items, i) {
       var dk = Sch.dateKey(Sch.addDays(start, i));
+      var old = opts && opts.old ? opts.old.days[i] : null;
+      if (old && i < opts.keepBefore) return old;
       return items.map(function (it) {
-        var done = S.completions.some(function (c) { return c.date === dk && c.taskId === it.taskId && c.kind === it.kind; });
-        var item = { uid: uid(), taskId: it.taskId, kind: it.kind, start: it.start, end: it.end, status: done ? 'done' : 'pending',
+        var item = { uid: uid(), taskId: it.taskId, kind: it.kind, start: it.start, end: it.end, status: priorStatus(old, dk, it.kind, it.taskId),
           monthly: it.monthly, overdue: it.overdue };
         var t = findTask(it.kind, it.taskId);
         if (t && t.options && t.options.length) {
@@ -140,11 +172,127 @@
       return x - y;
     });
   }
-  function regenerateFromToday() {
-    var wk = weekKeyFor(new Date());
-    Object.keys(S.plans).forEach(function (k) { if (k >= wk) delete S.plans[k]; });
-    buildWeek(wk);
+  /** Refaz a semana atual a partir de hoje. Dias passados, feitos e pulados continuam como estavam. */
+  function applyRegenNow() {
+    var wk = weekKeyFor(new Date()), old = S.plans[wk];
+    Object.keys(S.plans).forEach(function (k) { if (k > wk) delete S.plans[k]; });
+    buildWeek(wk, { old: old, keepBefore: Sch.weekdayIndex(new Date()) });
     save();
+  }
+  /** Mantém esta semana como está; a agenda nova vale a partir da próxima segunda. */
+  function applyRegenNext() {
+    var wk = weekKeyFor(new Date());
+    Object.keys(S.plans).forEach(function (k) { if (k > wk) delete S.plans[k]; });
+    save();
+  }
+  /** Lista o que mudaria (de hoje até domingo) se a agenda fosse refeita agora. */
+  function previewChanges() {
+    var now = new Date(), start = Sch.weekStart(now), wk = Sch.dateKey(start), old = S.plans[wk], todayIdx = Sch.weekdayIndex(now);
+    var tpl = Sch.buildPlan(planCfg(start));
+    function mapOf(days, isNew) {
+      var m = {};
+      days.forEach(function (items, i) {
+        if (i < todayIdx) return;
+        var dk = Sch.dateKey(Sch.addDays(start, i));
+        items.forEach(function (it) {
+          var st = isNew ? priorStatus(old && old.days[i], dk, it.kind, it.taskId) : it.status;
+          if (st !== 'pending' || !findTask(it.kind, it.taskId)) return;
+          var k = it.kind + ':' + it.taskId; (m[k] = m[k] || []).push(i);
+        });
+      });
+      return m;
+    }
+    var a = old ? mapOf(old.days, false) : {}, b = mapOf(tpl.days, true), keys = {}, lines = [];
+    Object.keys(a).concat(Object.keys(b)).forEach(function (k) { keys[k] = 1; });
+    function names(arr) { return arr && arr.length ? arr.sort().map(function (i) { return SHORT_DAYS[i]; }).join(', ') : 'nenhum dia'; }
+    Object.keys(keys).forEach(function (k) {
+      if (names(a[k]) === names(b[k])) return;
+      var i = k.indexOf(':'), t = findTask(k.slice(0, i), k.slice(i + 1));
+      lines.push({ name: t ? t.name : 'Atividade removida', from: names(a[k]), to: names(b[k]) });
+    });
+    return lines;
+  }
+  function openPreviewOr(silentMsg) {
+    var lines = previewChanges();
+    if (!lines.length) { applyRegenNow(); toast(silentMsg); }
+    else ui.modal = { type: 'preview', lines: lines };
+  }
+
+  // ---------------- modo dia difícil ----------------
+  function hardDayPlan(dk) {
+    var keep = [], move = [], leisureKept = false;
+    visibleItems(dayInfo(dk).items).forEach(function (it) {
+      if (it.status !== 'pending') return;
+      var t = findTask(it.kind, it.taskId), stays;
+      if (it.kind === 'leisure') { stays = !leisureKept; leisureKept = true; }
+      else stays = !!keepOnHardDay(it, t);
+      (stays ? keep : move).push({ it: it, t: t });
+    });
+    return { keep: keep, move: move };
+  }
+  function lightestDayAfter(dk) {
+    var base = Sch.parseKey(dk), best = null;
+    for (var i = 1; i <= 7; i++) {
+      var k = Sch.dateKey(Sch.addDays(base, i)), n = visibleItems(dayInfo(k).items).length;
+      if (!best || n < best.n) best = { k: k, n: n };
+    }
+    return best.k;
+  }
+
+  // ---------------- lembretes (notificações) ----------------
+  var notifTimers = [];
+  function notifySupported() { return 'Notification' in window; }
+  function showNotif(body, tag) {
+    var opts = { body: body, icon: 'icon-192.png', badge: 'icon-192.png', tag: tag };
+    try {
+      if (navigator.serviceWorker && navigator.serviceWorker.controller) navigator.serviceWorker.ready.then(function (r) { r.showNotification('Rotina Gentil', opts); });
+      else new Notification('Rotina Gentil', opts);
+    } catch (e) { }
+  }
+  /** Agenda avisos 10 min antes e na hora de cada atividade de hoje. */
+  function scheduleNotifs() {
+    notifTimers.forEach(clearTimeout); notifTimers = [];
+    if (!S.onboarded || !S.prefs.notify || !notifySupported() || Notification.permission !== 'granted') return;
+    var now = new Date(), nowMs = now.getTime();
+    visibleItems(dayInfo(todayKey()).items).forEach(function (it) {
+      if (it.status !== 'pending' || !it.start) return;
+      var t = findTask(it.kind, it.taskId), m = Sch.toMin(it.start);
+      var at = new Date(now.getFullYear(), now.getMonth(), now.getDate(), Math.floor(m / 60), m % 60).getTime();
+      [[at - 10 * 60000, 'Daqui a 10 min: '], [at, 'Agora é a vez de: ']].forEach(function (p) {
+        var delay = p[0] - nowMs;
+        if (delay > 0) notifTimers.push(setTimeout(function () { showNotif(p[1] + itemName(it, t), it.uid + p[1]); }, delay));
+      });
+    });
+    var nextDay = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 1).getTime();
+    notifTimers.push(setTimeout(scheduleNotifs, nextDay - nowMs));
+  }
+  function downloadFile(name, text, type) {
+    var blob = new Blob([text], { type: type });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  }
+  /** Arquivo de calendário (.ics) da semana, com alarme 10 min antes — a Agenda do celular avisa mesmo com o app fechado. */
+  function icsWeek() {
+    var base = Sch.weekStart(new Date()), plan = getWeek(Sch.dateKey(base)), tk = todayKey(), n = 0;
+    function p(x) { return (x < 10 ? '0' : '') + x; }
+    function stamp(d, hhmm) { var m = Sch.toMin(hhmm); return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + 'T' + p(Math.floor(m / 60)) + p(m % 60) + '00'; }
+    function esc(s) { return String(s).replace(/[\\;,]/g, function (c) { return '\\' + c; }).replace(/\n/g, '\\n'); }
+    var now = new Date(), dtstamp = now.getUTCFullYear() + p(now.getUTCMonth() + 1) + p(now.getUTCDate()) + 'T' + p(now.getUTCHours()) + p(now.getUTCMinutes()) + '00Z';
+    var lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Rotina Gentil//PT-BR', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH'];
+    plan.days.forEach(function (items, i) {
+      var d = Sch.addDays(base, i);
+      if (Sch.dateKey(d) < tk) return;
+      items.forEach(function (it) {
+        var t = findTask(it.kind, it.taskId);
+        if (!t || it.status !== 'pending' || !it.start || !it.end) return;
+        n++;
+        lines.push('BEGIN:VEVENT', 'UID:' + it.uid + '@rotina-gentil', 'DTSTAMP:' + dtstamp, 'DTSTART:' + stamp(d, it.start), 'DTEND:' + stamp(d, it.end),
+          'SUMMARY:' + esc(itemName(it, t)), 'BEGIN:VALARM', 'ACTION:DISPLAY', 'DESCRIPTION:' + esc(itemName(it, t)), 'TRIGGER:-PT10M', 'END:VALARM', 'END:VEVENT');
+      });
+    });
+    lines.push('END:VCALENDAR');
+    return { text: lines.join('\r\n'), n: n };
   }
   function visibleItems(items) { return items.filter(function (it) { return findTask(it.kind, it.taskId); }); }
 
@@ -275,8 +423,27 @@
       '<div class="card soft"><h3>Como funciona</h3>' +
       '<p>1. Você diz quando tem tempo livre.</p><p>2. Você diz quais tarefas da casa precisa fazer (e, se quiser, atividade física).</p>' +
       '<p>3. Você conta o que gosta de fazer no lazer.</p><p>4. O app monta sua semana. Você só abre e vê <b>uma coisa por vez</b>.</p></div>' +
-      '<p class="muted small">Leva uns 5 minutos. Você pode mudar tudo depois. Seus dados ficam só neste aparelho.</p>' +
-      '</div>' + stepFooter(isStandalone() ? 'Vamos começar' : 'Continuar no navegador');
+      '<p class="muted small">Você pode mudar tudo depois. Seus dados ficam só neste aparelho.</p>' +
+      '</div><div class="stack" style="margin-top:16px">' +
+      '<button type="button" class="primary big" data-a="quickStart">⚡ Começo rápido (2 min)</button>' +
+      '<button type="button" class="ghost full" data-a="next">Cadastro completo (5 min)</button>' +
+      (isStandalone() ? '' : '<p class="muted small center">Você pode continuar aqui no navegador ou instalar o app primeiro.</p>') + '</div>';
+  };
+  views.quick = function () {
+    var q = ui.quick;
+    function chip(action, i, label, on) { return '<button type="button" class="chip" data-a="' + action + '" data-i="' + i + '" aria-pressed="' + !!on + '">' + h(label) + '</button>'; }
+    function any(o) { return Object.keys(o).some(function (k) { return o[k]; }); }
+    var ok = any(q.slots) && any(q.chores);
+    return '<h1>⚡ Começo rápido</h1><p class="muted">Três perguntas e sua semana fica pronta. Depois você ajusta o que quiser em Ajustes.</p>' +
+      '<h3>1. Quando você costuma ter tempo livre?</h3><div class="chips">' +
+      QUICK_SLOTS.map(function (s, i) { return chip('qSlot', i, s[0], q.slots[i]); }).join('') + '</div>' +
+      '<h3 style="margin-top:18px">2. Quais tarefas da casa você precisa fazer?</h3><div class="chips">' +
+      QUICK_CHORES.map(function (i) { return chip('qChore', i, C.chores[i][0], q.chores[i]); }).join('') + '</div>' +
+      '<h3 style="margin-top:18px">3. O que você gosta de fazer no tempo livre?</h3><div class="chips">' +
+      QUICK_LEISURE.map(function (l, i) { var a = C.leisureAreas[l[0]]; return chip('qLeisure', i, a.icon + ' ' + a.ideas[l[1]][0], q.leisure[i]); }).join('') + '</div>' +
+      (ok ? '' : '<p class="muted small" style="margin-top:12px">Escolha pelo menos um horário e uma tarefa.</p>') +
+      '<div class="bottom-actions"><button type="button" class="ghost" data-a="quickBack">Voltar</button>' +
+      '<button type="button" class="primary" data-a="quickBuild"' + (ok ? '' : ' disabled') + '>Montar minha semana ✨</button></div>';
   };
   views.prefs = function () {
     var p = S.prefs;
@@ -500,13 +667,33 @@
       return '<p class="small">' + h(f.t.name) + ' — ' + C.weekdays[f.day].toLowerCase() + (f.overdue ? ' <span class="muted">(ficou da semana passada, sem problema)</span>' : '') + '</p>';
     }).join('') + '</div>';
   }
+  function checkinCard(pendingCount) {
+    var dk = todayKey();
+    if (S.meta.checkin === dk) {
+      if (ui.energyAsk && pendingCount > 1) {
+        return '<div class="card soft"><p style="margin-top:0"><b>Energia baixa hoje.</b> Quer deixar o dia mais leve? Fica só o essencial e o resto vai para outros dias.</p>' +
+          '<div class="row"><button type="button" class="primary grow" data-a="hardDay">Sim, deixar leve</button><button type="button" class="ghost grow" data-a="energyKeep">Manter o dia</button></div></div>';
+      }
+      return '';
+    }
+    return '<div class="card soft checkin"><p style="margin-top:0"><b>Como está sua energia agora?</b></p><div class="seg">' +
+      [['high', '🔋', 'Boa'], ['mid', '🙂', 'Média'], ['low', '🪫', 'Baixa']].map(function (e) {
+        return '<button type="button" data-a="energy" data-v="' + e[0] + '"><span class="emo" aria-hidden="true">' + e[1] + '</span>' + e[2] + '</button>';
+      }).join('') + '</div><div class="center"><button type="button" class="link" data-a="energySkip">Pular</button></div></div>';
+  }
+  function notifyCard() {
+    if (S.prefs.notify || S.meta.notifyAsked || !notifySupported() || Notification.permission === 'denied' || S.meta.checkin !== todayKey()) return '';
+    return '<div class="card soft"><p style="margin-top:0">🔔 <b>Quer que o celular te avise</b> 10 minutos antes de cada atividade?</p>' +
+      '<div class="row"><button type="button" class="primary grow" data-a="notifyOn">Sim, avisar</button><button type="button" class="ghost grow" data-a="notifyLater">Agora não</button></div></div>';
+  }
   views.today = function () {
     var now = new Date(), dk = todayKey(), di = dayInfo(dk), items = visibleItems(di.items);
     var hr = now.getHours(), greet = hr < 12 ? 'Bom dia' : hr < 18 ? 'Boa tarde' : 'Boa noite';
+    var pending = items.filter(function (it) { return it.status === 'pending'; });
     var html = '<p class="muted" style="margin:0">' + greet + ' 🌱</p><h1 style="font-size:1.35rem">' + fmtDate(now) + '</h1>';
+    html += checkinCard(pending.length) + notifyCard();
     html += needsPanel();
 
-    var pending = items.filter(function (it) { return it.status === 'pending'; });
     var next = pending[0];
     if (!items.length) {
       html += '<div class="card now center"><div style="font-size:2.4rem">☁️</div><h2>Hoje é um dia livre</h2><p class="muted">Nada planejado. Descansar também é cuidar de você.</p></div>';
@@ -515,7 +702,9 @@
     } else {
       var t = findTask(next.kind, next.taskId);
       var startMin = next.start ? Sch.toMin(next.start) : null, nowMin = hr * 60 + now.getMinutes();
-      var when = !next.start ? 'Quando quiser hoje' : startMin > nowMin ? 'Começa às ' + next.start + ' · pode começar antes, se quiser' :
+      var when = !next.start ? 'Quando quiser hoje' :
+        startMin > nowMin && startMin - nowMin <= 10 ? '⏰ Começa em ' + (startMin - nowMin) + ' min (às ' + next.start + ')' :
+        startMin > nowMin ? 'Começa às ' + next.start + ' · pode começar antes, se quiser' :
         Sch.toMin(next.end) < nowMin ? 'Era para as ' + next.start + ' · tudo bem fazer agora' : next.start + ' – ' + next.end;
       html += '<div class="card now ' + next.kind + '">' +
         '<span class="tag">' + (next.monthly ? '📌 Tarefa do mês' : KIND_TAG[next.kind]) + '</span>' +
@@ -537,7 +726,13 @@
           '<div class="center"><button type="button" class="link" data-a="toggleDay">Ver o dia todo (' + items.length + ')</button></div>';
       }
     }
+    if (ui.hardUndo) html += '<p class="center small muted">Dia leve ativado. <button type="button" class="link" data-a="hardUndo">Desfazer</button></p>';
+    else if (pending.length > 1 && S.meta.hardDay !== dk) html += '<div class="center"><button type="button" class="link" data-a="hardDay">🪫 Hoje está difícil</button></div>';
     html += monthlyReminder();
+    if (S.meta.quickPending) {
+      html += '<div class="card soft"><p style="margin-top:0">⚡ Você usou o começo rápido. Quando quiser, ajuste as frequências e adicione tarefas do mês, atividade física e seus jogos favoritos.</p>' +
+        '<div class="row"><button type="button" class="ghost grow" data-a="go" data-view="settings">Ir para Ajustes</button><button type="button" class="link" data-a="quickDismiss">Dispensar</button></div></div>';
+    }
     return html;
   };
   views.week = function () {
@@ -553,6 +748,7 @@
         (dk === tk ? '<span class="today-badge">Hoje</span>' : '') + '</div>' +
         (items.length ? items.map(function (it) { return itemLine(dk, it, true); }).join('') : '<p class="muted small">Livre ☁️</p>') + '</div>';
     }
+    if (ui.weekOffset === 0) html += '<button type="button" class="ghost full" data-a="exportIcs">📅 Colocar esta semana na agenda do celular</button>';
     if (plan.unscheduled && plan.unscheduled.length) {
       var counts = {}; plan.unscheduled.forEach(function (u) { counts[u.name] = (counts[u.name] || 0) + 1; });
       html += '<div class="card soft"><h3>📦 Não couberam nesta semana</h3><p>' + Object.keys(counts).map(function (n) { return h(n) + ' (' + counts[n] + '×)'; }).join(', ') +
@@ -576,12 +772,22 @@
     if (!S.exercise.length) html += '<div class="card soft"><p>🏃 Sem atividade física cadastrada. Se quiser, <button type="button" class="link" data-a="edit" data-step="exercise">adicione aqui</button>.</p></div>';
     return html;
   };
+  function notifStatusHtml() {
+    if (!notifySupported()) return '<p class="small">Este navegador não permite lembretes.</p>';
+    if (Notification.permission === 'denied') return '<p class="small">Os lembretes estão <b>bloqueados</b>. Para liberar: Configurações do Android → Apps → Chrome → Notificações.</p>';
+    if (S.prefs.notify && Notification.permission === 'granted') return '<p class="small"><b>Ligados ✓</b></p><button type="button" class="ghost full" data-a="notifyOff">Desligar lembretes</button>';
+    return '<button type="button" class="primary full" data-a="notifyOn">Ligar lembretes</button>';
+  }
   views.settings = function () {
     var p = S.prefs;
     return '<h1>Ajustes</h1>' +
       (storageOk ? '' : '<div class="card soft"><b>Atenção:</b> este navegador não está deixando salvar. Faça um backup.</div>') +
       (!isStandalone() ? '<div class="card install"><h3>📲 Instalar o app</h3>' + (ui.installEvt ? '<button type="button" class="primary full" data-a="install">Instalar agora</button>' :
         '<p class="small">No Chrome: toque em <b>⋮</b> → <b>“Instalar app”</b>.</p>') + '</div>' : '') +
+      '<div class="card"><h3>🔔 Lembretes</h3>' + notifStatusHtml() +
+      '<p class="muted small">O app avisa 10 minutos antes e na hora de cada atividade, enquanto estiver aberto ou em segundo plano. ' +
+      'Para garantir o aviso mesmo com o app fechado, coloque a semana na agenda do celular:</p>' +
+      '<button type="button" class="ghost full" data-a="exportIcs">📅 Colocar esta semana na agenda do celular</button></div>' +
       '<div class="card"><h3>Visual</h3>' +
       '<label class="field">Tamanho do texto</label>' + seg('pref', 'data-k="scale"', [[1, 'Normal'], [1.15, 'Grande'], [1.3, 'Enorme']], p.scale) +
       '<label class="field">Cores</label>' + seg('pref', 'data-k="theme"', [['light', 'Claro'], ['dark', 'Escuro']], p.theme) +
@@ -662,6 +868,27 @@
         '<div class="stack"><button type="button" class="primary" data-a="exerciseAdd">Adicionar atividade física</button>' +
         '<button type="button" class="ghost" data-a="exerciseLater">Agora não</button></div>');
     }
+    if (m.type === 'preview') {
+      var shown = m.lines.slice(0, 10);
+      return sheet('O que vai mudar', '<h2 style="margin-top:0">Isto vai mudar na sua semana</h2>' +
+        '<p class="muted small">De hoje até domingo. O que já passou, o que você fez e o que pulou continuam iguais.</p>' +
+        shown.map(function (l) {
+          return '<div class="item"><span class="grow"><b>' + h(l.name) + '</b><br><span class="small muted">antes: ' + l.from + '</span><br><span class="small">agora: <b>' + l.to + '</b></span></span></div>';
+        }).join('') +
+        (m.lines.length > shown.length ? '<p class="small muted">…e mais ' + (m.lines.length - shown.length) + ' mudança(s).</p>' : '') +
+        '<div class="stack" style="margin-top:12px"><button type="button" class="primary" data-a="applyNow">Mudar a agenda agora</button>' +
+        '<button type="button" class="ghost" data-a="applyNext">Manter esta semana; mudar só a partir de segunda</button></div>');
+    }
+    if (m.type === 'hardDay') {
+      var p = hardDayPlan(todayKey());
+      function list(arr) { return arr.map(function (x) { return '<li>' + h(itemName(x.it, x.t)) + '</li>'; }).join(''); }
+      return sheet('Dia difícil', '<div class="center" style="font-size:2.2rem">🪫</div><h2 style="margin-top:0">Vamos deixar hoje mais leve</h2>' +
+        (p.move.length ? '<p><b>Fica hoje (o essencial):</b></p><ul>' + (list(p.keep) || '<li>Nada — hoje é para descansar.</li>') + '</ul>' +
+          '<p><b>Vai para os próximos dias:</b></p><ul>' + list(p.move) + '</ul>' +
+          '<p class="muted small">Elas vão para os dias mais tranquilos da semana. Dá para desfazer.</p>' +
+          '<div class="stack"><button type="button" class="primary" data-a="hardDayYes">Sim, deixar leve</button><button type="button" class="ghost" data-a="closeModal">Cancelar</button></div>' :
+          '<p>Hoje já tem só o essencial. Faça no seu ritmo — e se não der, tudo bem pular.</p><div class="stack"><button type="button" class="ghost" data-a="closeModal">Ok</button></div>'));
+    }
     var it = findItem(m.dk, m.uid), t = it && findTask(it.kind, it.taskId);
     if (!t) return '';
     var body = '<h2 style="margin-top:0">' + h(itemName(it, t)) + '</h2>';
@@ -712,7 +939,7 @@
     checkPrompts();
     var fk = focusKey(document.activeElement);
     var html;
-    if (!S.onboarded) html = views[STEPS[S.step]]();
+    if (!S.onboarded) html = S.meta.quick ? views.quick() : views[STEPS[S.step]]();
     else if (ui.edit) html = views[ui.edit]();
     else if (ui.view === 'focus') html = views.focus();
     else {
@@ -729,6 +956,7 @@
       var els = app.querySelectorAll('[data-a],[data-bind]');
       for (var i = 0; i < els.length; i++) if (focusKey(els[i]) === fk) { els[i].focus({ preventScroll: true }); break; }
     }
+    scheduleNotifs();
   }
   var toastTimer = null;
   function toast(msg) {
@@ -792,18 +1020,86 @@
     save(); render();
     var again = app.querySelector('input[data-bind="optionInput"][data-id="' + t.id + '"]'); if (again) again.focus();
   }
+  function finishOnboarding() {
+    var now = Date.now();
+    S.onboarded = true; S.seedTs = now; S.plans = {}; ui.view = 'today';
+    S.meta.leisureCheck = now; S.meta.exercisePrompt = now;
+    buildWeek(weekKeyFor(new Date())); save();
+    toast('Sua semana está pronta. Agora é só seguir uma coisa por vez. 💚');
+    ui.prompted = true; render(); scrollTop();
+  }
+  function moodToast(v) { return { high: 'Que bom! Vamos nessa, uma coisa por vez.', mid: 'Ok. No seu ritmo.', low: 'Tudo bem. Hoje vamos com calma.' }[v]; }
   var actions = {
     next: function () {
-      if (STEPS[S.step] === 'analysis') {
-        var now = Date.now();
-        S.onboarded = true; S.seedTs = now; S.plans = {}; ui.view = 'today';
-        S.meta.leisureCheck = now; S.meta.exercisePrompt = now;
-        buildWeek(weekKeyFor(new Date())); save();
-        toast('Sua semana está pronta. Agora é só seguir uma coisa por vez. 💚');
-        ui.prompted = true; render(); scrollTop(); return;
-      }
+      if (STEPS[S.step] === 'analysis') { finishOnboarding(); return; }
       setStep(S.step + 1);
     },
+    quickStart: function () { S.meta.quick = true; save(); render(); scrollTop(); },
+    quickBack: function () { S.meta.quick = false; save(); render(); scrollTop(); },
+    qSlot: function (el) { ui.quick.slots[el.dataset.i] = !ui.quick.slots[el.dataset.i]; render(); },
+    qChore: function (el) { ui.quick.chores[el.dataset.i] = !ui.quick.chores[el.dataset.i]; render(); },
+    qLeisure: function (el) { ui.quick.leisure[el.dataset.i] = !ui.quick.leisure[el.dataset.i]; render(); },
+    quickBuild: function () {
+      var q = ui.quick;
+      S.slots = emptySlots(); S.chores = []; S.leisure = []; S.exercise = []; S.areas = {};
+      QUICK_SLOTS.forEach(function (s, i) { if (q.slots[i]) s[3].forEach(function (d) { S.slots[d].push({ start: s[1], end: s[2] }); }); });
+      QUICK_CHORES.forEach(function (i) {
+        if (!q.chores[i]) return;
+        var c = C.chores[i];
+        newTask('chore', { name: c[0], need: c[1], duration: c[2], times: c[3], unit: c[4], importance: c[5] });
+      });
+      QUICK_LEISURE.forEach(function (l, i) {
+        if (!q.leisure[i]) return;
+        var a = C.leisureAreas[l[0]], idea = a.ideas[l[1]];
+        if (!S.areas[l[0]]) S.areas[l[0]] = { joy: 2, now: 1 };
+        newTask('leisure', { name: idea[0], duration: idea[1], times: 1, need: a.need, area: l[0] });
+      });
+      S.meta.quick = false; S.meta.quickPending = true;
+      finishOnboarding();
+    },
+    quickDismiss: function () { S.meta.quickPending = false; save(); render(); },
+
+    energy: function (el) {
+      var dk = todayKey(), v = el.dataset.v;
+      S.meta.checkin = dk;
+      S.energy = (S.energy || []).concat([{ date: dk, level: v, ts: Date.now() }]).slice(-180);
+      ui.energyAsk = v === 'low' && S.meta.hardDay !== dk;
+      save(); if (!ui.energyAsk) toast(moodToast(v)); render();
+    },
+    energySkip: function () { S.meta.checkin = todayKey(); save(); render(); },
+    energyKeep: function () { ui.energyAsk = false; toast('Combinado. Vá no seu ritmo — pular também é permitido.'); render(); },
+    hardDay: function () { ui.modal = { type: 'hardDay' }; render(); },
+    hardDayYes: function () {
+      var dk = todayKey(), p = hardDayPlan(dk), moves = [];
+      p.move.forEach(function (x) { var to = lightestDayAfter(dk); moveItem(dk, x.it.uid, to); moves.push({ uid: x.it.uid, from: dk, to: to }); });
+      ui.hardUndo = moves; ui.energyAsk = false; ui.modal = null; S.meta.hardDay = dk; save();
+      toast(moves.length + ' atividade(s) foram para outros dias. Hoje ficou mais leve. 💚'); render(); scrollTop();
+    },
+    hardUndo: function () {
+      (ui.hardUndo || []).forEach(function (m) { moveItem(m.to, m.uid, m.from); });
+      ui.hardUndo = null; S.meta.hardDay = null; save(); toast('Desfeito. O dia voltou a ter tudo.'); render();
+    },
+    notifyOn: function () {
+      if (!notifySupported()) return;
+      S.meta.notifyAsked = true;
+      Notification.requestPermission().then(function (perm) {
+        S.prefs.notify = perm === 'granted'; save();
+        if (perm === 'granted') { showNotif('Lembretes ligados! Vou avisar 10 min antes de cada atividade.', 'teste'); toast('Lembretes ligados. 🔔'); }
+        else toast('Sem permissão para lembretes. Dá para ligar depois em Ajustes.');
+        render();
+      });
+    },
+    notifyOff: function () { S.prefs.notify = false; save(); toast('Lembretes desligados.'); render(); },
+    notifyLater: function () { S.meta.notifyAsked = true; save(); toast('Tudo bem. Dá para ligar depois em Ajustes.'); render(); },
+    exportIcs: function () {
+      var r = icsWeek();
+      if (!r.n) { toast('Não há atividades com horário para o resto desta semana.'); render(); return; }
+      try { downloadFile('rotina-gentil-semana-' + todayKey() + '.ics', r.text, 'text/calendar'); toast(r.n + ' atividades no arquivo. Abra o arquivo baixado e escolha seu app de Agenda.'); }
+      catch (e) { toast('Não consegui gerar o arquivo neste navegador.'); }
+      render();
+    },
+    applyNow: function () { applyRegenNow(); ui.modal = null; toast('Pronto. A agenda foi atualizada.'); render(); },
+    applyNext: function () { applyRegenNext(); ui.modal = null; toast('Combinado. Esta semana fica como está; a nova agenda começa na segunda.'); render(); },
     back: function () { setStep(S.step - 1); },
     pref: function (el) {
       var k = el.dataset.k, v = el.dataset.v;
@@ -920,16 +1216,13 @@
     editDone: function () {
       var wasAnalysis = ui.edit === 'analysis';
       ui.edit = null;
-      if (!wasAnalysis) { regenerateFromToday(); toast('Salvo. A agenda desta semana foi refeita.'); }
+      if (!wasAnalysis) openPreviewOr('Salvo. A agenda desta semana não precisou mudar.');
       render(); scrollTop();
     },
-    regen: function () { regenerateFromToday(); toast('Agenda refeita.'); render(); },
+    regen: function () { openPreviewOr('A agenda já está atualizada — nada mudou.'); render(); },
     export: function () {
       try {
-        var blob = new Blob([JSON.stringify(S, null, 1)], { type: 'application/json' });
-        var a = document.createElement('a');
-        a.href = URL.createObjectURL(blob); a.download = 'rotina-gentil-backup-' + todayKey() + '.json';
-        document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+        downloadFile('rotina-gentil-backup-' + todayKey() + '.json', JSON.stringify(S, null, 1), 'application/json');
         toast('Cópia salva na pasta de downloads.');
       } catch (e) { toast('Não consegui salvar a cópia neste navegador.'); }
       render();
@@ -945,6 +1238,7 @@
     resetYes: function () {
       S = defaults(); save();
       ui.view = 'today'; ui.edit = null; ui.modal = null; ui.focus = null; ui.weekOffset = 0; ui.prompted = false;
+      ui.quick = { slots: {}, chores: {}, leisure: {} }; ui.energyAsk = false; ui.hardUndo = null;
       render(); scrollTop();
     }
   };

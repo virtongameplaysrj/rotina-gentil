@@ -1,5 +1,5 @@
 /* Faz o app funcionar sem internet depois da primeira abertura. */
-var CACHE = 'rotina-gentil-v2';
+var CACHE = 'rotina-gentil-v3';
 var FILES = ['./', './index.html', './styles.css', './scheduler.js', './data.js', './app.js', './manifest.webmanifest',
   './icon-192.png', './icon-512.png', './icon-maskable-512.png'];
 
