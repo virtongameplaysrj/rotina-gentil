@@ -1,0 +1,90 @@
+# Monta o APK do Rotina Gentil e publica como "Release" no GitHub.
+# O Obtainium olha as Releases deste repositório para instalar e atualizar o app.
+#
+# - Pull Request: só monta um APK de teste (para conferir que nada quebrou).
+# - Push na main: monta o APK assinado e publica uma nova Release (v1.0.N).
+name: APK Android
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['**.md']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    env:
+      VERSION: 1.0.${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Preparar o app
+        run: |
+          npm ci
+          npm run sync
+
+      - name: APK de teste (Pull Request)
+        if: github.event_name == 'pull_request'
+        working-directory: android
+        run: ./gradlew --no-daemon assembleDebug -PversionCode=${{ github.run_number }} -PversionName=$VERSION-teste
+
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'pull_request'
+        with:
+          name: rotina-gentil-teste
+          path: android/app/build/outputs/apk/debug/*.apk
+
+      - name: Conferir a chave de assinatura
+        if: github.event_name != 'pull_request'
+        env:
+          KS: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KSP: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KA: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KP: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KS" ] || [ -z "$KSP" ] || [ -z "$KA" ] || [ -z "$KP" ]; then
+            echo "::error::Faltam os Secrets da chave (ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD). Veja COMO-TESTAR.md, Parte 4."
+            exit 1
+          fi
+          echo "$KS" | base64 -d > "$RUNNER_TEMP/rotina-gentil.keystore"
+
+      - name: APK assinado
+        if: github.event_name != 'pull_request'
+        working-directory: android
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/rotina-gentil.keystore
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          ./gradlew --no-daemon assembleRelease -PversionCode=${{ github.run_number }} -PversionName=$VERSION
+          cp app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/rotina-gentil-v$VERSION.apk"
+
+      - name: Publicar Release
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v$VERSION" "$RUNNER_TEMP/rotina-gentil-v$VERSION.apk" \
+            --target "$GITHUB_SHA" \
+            --title "Rotina Gentil $VERSION" \
+            --notes "Versão $VERSION do Rotina Gentil para Android. Instale ou atualize pelo Obtainium usando o endereço deste repositório."

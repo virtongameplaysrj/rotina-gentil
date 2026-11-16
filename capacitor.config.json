@@ -1,0 +1,14 @@
+{
+  "appId": "io.github.virtongameplaysrj.rotinagentil",
+  "appName": "Rotina Gentil",
+  "webDir": "www",
+  "android": {
+    "backgroundColor": "#f4f1ea"
+  },
+  "plugins": {
+    "LocalNotifications": {
+      "smallIcon": "ic_stat_notify",
+      "iconColor": "#2f6f6d"
+    }
+  }
+}
