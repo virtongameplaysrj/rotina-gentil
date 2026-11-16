@@ -93,7 +93,10 @@
   function fmtMin(m) { m = Math.round(m); if (m < 60) return m + ' min'; var hh = Math.floor(m / 60), mm = m % 60; return hh + 'h' + (mm ? (mm < 10 ? '0' : '') + mm : ''); }
   function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
   function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
-  function isStandalone() { try { return window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true; } catch (e) { return false; } }
+  // App Android (APK feito com Capacitor): usa notificações e compartilhamento nativos.
+  var NATIVE = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+  var NP = NATIVE ? window.Capacitor.Plugins : {};
+  function isStandalone() { if (NATIVE) return true; try { return window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true; } catch (e) { return false; } }
 
   function listOf(kind) { return kind === 'leisure' ? S.leisure : kind === 'exercise' ? S.exercise : S.chores; }
   function findTask(kind, id) {
@@ -241,8 +244,32 @@
 
   // ---------------- lembretes (notificações) ----------------
   var notifTimers = [];
-  function notifySupported() { return 'Notification' in window; }
+  var nativePerm = 'prompt', nativeSig = '';
+  function notifySupported() { return NATIVE ? !!NP.LocalNotifications : 'Notification' in window; }
+  function notifPerm() { return NATIVE ? nativePerm : Notification.permission; }
+  function permFrom(r) { return r && r.display === 'granted' ? 'granted' : r && r.display === 'denied' ? 'denied' : 'prompt'; }
+  function requestNotifPerm() {
+    if (!NATIVE) return Notification.requestPermission();
+    return NP.LocalNotifications.requestPermissions().then(function (r) { nativePerm = permFrom(r); return nativePerm; });
+  }
+  function refreshNativePerm() {
+    if (!NATIVE || !NP.LocalNotifications) return;
+    NP.LocalNotifications.checkPermissions().then(function (r) {
+      var p = permFrom(r);
+      if (p !== nativePerm) { nativePerm = p; nativeSig = ''; render(); }
+    }).catch(function () { });
+  }
+  /** Número fixo para cada aviso (o Android identifica as notificações por número). */
+  function notifId(str) {
+    var x = 0;
+    for (var i = 0; i < str.length; i++) x = (x * 31 + str.charCodeAt(i)) | 0;
+    return Math.abs(x) % 2000000000 + 1;
+  }
   function showNotif(body, tag) {
+    if (NATIVE) {
+      try { NP.LocalNotifications.schedule({ notifications: [{ id: notifId('agora' + tag + Date.now()), title: 'Rotina Gentil', body: body }] }); } catch (e) { }
+      return;
+    }
     var opts = { body: body, icon: 'icon-192.png', badge: 'icon-192.png', tag: tag };
     try {
       if (navigator.serviceWorker && navigator.serviceWorker.controller) navigator.serviceWorker.ready.then(function (r) { r.showNotification('Rotina Gentil', opts); });
@@ -251,6 +278,7 @@
   }
   /** Agenda avisos 10 min antes e na hora de cada atividade de hoje. */
   function scheduleNotifs() {
+    if (NATIVE) { scheduleNativeNotifs(); return; }
     notifTimers.forEach(clearTimeout); notifTimers = [];
     if (!S.onboarded || !S.prefs.notify || !notifySupported() || Notification.permission !== 'granted') return;
     var now = new Date(), nowMs = now.getTime();
@@ -265,6 +293,44 @@
     });
     var nextDay = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 1).getTime();
     notifTimers.push(setTimeout(scheduleNotifs, nextDay - nowMs));
+  }
+  /**
+   * No APK, o Android agenda os avisos de hoje e dos próximos 2 dias.
+   * Eles tocam mesmo com o app fechado. Só reagenda quando algo mudou.
+   */
+  function scheduleNativeNotifs() {
+    var LN = NP.LocalNotifications;
+    if (!LN) return;
+    var list = [];
+    if (S.onboarded && S.prefs.notify && nativePerm === 'granted') {
+      var now = new Date(), nowMs = now.getTime();
+      for (var d = 0; d < 3; d++) {
+        var day = Sch.addDays(new Date(now.getFullYear(), now.getMonth(), now.getDate()), d);
+        visibleItems(dayInfo(Sch.dateKey(day)).items).forEach(function (it) {
+          if (it.status !== 'pending' || !it.start) return;
+          var t = findTask(it.kind, it.taskId), m = Sch.toMin(it.start);
+          var at = new Date(day.getFullYear(), day.getMonth(), day.getDate(), Math.floor(m / 60), m % 60).getTime();
+          [[at - 10 * 60000, 'Daqui a 10 min: '], [at, 'Agora é a vez de: ']].forEach(function (p) {
+            if (p[0] > nowMs + 5000) list.push({ id: notifId(it.uid + p[1] + p[0]), title: 'Rotina Gentil', body: p[1] + itemName(it, t), schedule: { at: new Date(p[0]), allowWhileIdle: true } });
+          });
+        });
+      }
+    }
+    var sig = list.map(function (n) { return n.id + '@' + n.schedule.at.getTime() + n.body; }).join('|');
+    if (sig === nativeSig) return;
+    nativeSig = sig;
+    LN.getPending().then(function (r) {
+      var old = (r && r.notifications || []).map(function (n) { return { id: n.id }; });
+      return old.length ? LN.cancel({ notifications: old }) : null;
+    }).then(function () {
+      return list.length ? LN.schedule({ notifications: list }) : null;
+    }).catch(function () { nativeSig = ''; });
+  }
+  /** No APK: grava o arquivo e abre o menu "Compartilhar" do Android (Drive, WhatsApp, Agenda, Arquivos…). */
+  function shareFile(name, text) {
+    return NP.Filesystem.writeFile({ path: name, data: text, directory: 'CACHE', encoding: 'utf8' }).then(function (r) {
+      return NP.Share.share({ title: name, dialogTitle: 'Onde guardar ' + name + '?', files: [r.uri] });
+    });
   }
   function downloadFile(name, text, type) {
     var blob = new Blob([text], { type: type });
@@ -682,7 +748,7 @@
       }).join('') + '</div><div class="center"><button type="button" class="link" data-a="energySkip">Pular</button></div></div>';
   }
   function notifyCard() {
-    if (S.prefs.notify || S.meta.notifyAsked || !notifySupported() || Notification.permission === 'denied' || S.meta.checkin !== todayKey()) return '';
+    if (S.prefs.notify || S.meta.notifyAsked || !notifySupported() || notifPerm() === 'denied' || S.meta.checkin !== todayKey()) return '';
     return '<div class="card soft"><p style="margin-top:0">🔔 <b>Quer que o celular te avise</b> 10 minutos antes de cada atividade?</p>' +
       '<div class="row"><button type="button" class="primary grow" data-a="notifyOn">Sim, avisar</button><button type="button" class="ghost grow" data-a="notifyLater">Agora não</button></div></div>';
   }
@@ -774,8 +840,8 @@
   };
   function notifStatusHtml() {
     if (!notifySupported()) return '<p class="small">Este navegador não permite lembretes.</p>';
-    if (Notification.permission === 'denied') return '<p class="small">Os lembretes estão <b>bloqueados</b>. Para liberar: Configurações do Android → Apps → Chrome → Notificações.</p>';
-    if (S.prefs.notify && Notification.permission === 'granted') return '<p class="small"><b>Ligados ✓</b></p><button type="button" class="ghost full" data-a="notifyOff">Desligar lembretes</button>';
+    if (notifPerm() === 'denied') return '<p class="small">Os lembretes estão <b>bloqueados</b>. Para liberar: Configurações do Android → Apps → ' + (NATIVE ? 'Rotina Gentil' : 'Chrome') + ' → Notificações.</p>';
+    if (S.prefs.notify && notifPerm() === 'granted') return '<p class="small"><b>Ligados ✓</b></p><button type="button" class="ghost full" data-a="notifyOff">Desligar lembretes</button>';
     return '<button type="button" class="primary full" data-a="notifyOn">Ligar lembretes</button>';
   }
   views.settings = function () {
@@ -1082,7 +1148,7 @@
     notifyOn: function () {
       if (!notifySupported()) return;
       S.meta.notifyAsked = true;
-      Notification.requestPermission().then(function (perm) {
+      requestNotifPerm().then(function (perm) {
         S.prefs.notify = perm === 'granted'; save();
         if (perm === 'granted') { showNotif('Lembretes ligados! Vou avisar 10 min antes de cada atividade.', 'teste'); toast('Lembretes ligados. 🔔'); }
         else toast('Sem permissão para lembretes. Dá para ligar depois em Ajustes.');
@@ -1094,6 +1160,12 @@
     exportIcs: function () {
       var r = icsWeek();
       if (!r.n) { toast('Não há atividades com horário para o resto desta semana.'); render(); return; }
+      if (NATIVE) {
+        shareFile('rotina-gentil-semana-' + todayKey() + '.ics', r.text)
+          .then(function () { toast(r.n + ' atividades no arquivo. Escolha seu app de Agenda para abrir.'); render(); })
+          .catch(function () { });
+        return;
+      }
       try { downloadFile('rotina-gentil-semana-' + todayKey() + '.ics', r.text, 'text/calendar'); toast(r.n + ' atividades no arquivo. Abra o arquivo baixado e escolha seu app de Agenda.'); }
       catch (e) { toast('Não consegui gerar o arquivo neste navegador.'); }
       render();
@@ -1221,6 +1293,12 @@
     },
     regen: function () { openPreviewOr('A agenda já está atualizada — nada mudou.'); render(); },
     export: function () {
+      if (NATIVE) {
+        shareFile('rotina-gentil-backup-' + todayKey() + '.json', JSON.stringify(S, null, 1))
+          .then(function () { toast('Cópia pronta. Guarde em um lugar seguro, como o Google Drive.'); render(); })
+          .catch(function () { });
+        return;
+      }
       try {
         downloadFile('rotina-gentil-backup-' + todayKey() + '.json', JSON.stringify(S, null, 1), 'application/json');
         toast('Cópia salva na pasta de downloads.');
@@ -1281,7 +1359,10 @@
     if (ev.key === 'Enter' && el.getAttribute && el.getAttribute('data-bind') === 'optionInput') { ev.preventDefault(); addOptionFrom(el); }
   });
   // volta ao app depois de um tempo: atualiza "hoje", as barras e os lembretes
-  document.addEventListener('visibilitychange', function () { if (!document.hidden && ui.view !== 'focus' && !ui.edit) { ui.prompted = false; render(); } });
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) refreshNativePerm();
+    if (!document.hidden && ui.view !== 'focus' && !ui.edit) { ui.prompted = false; render(); }
+  });
   window.addEventListener('beforeinstallprompt', function (e) {
     e.preventDefault(); ui.installEvt = e;
     if (!S.onboarded || ui.view === 'settings') render();
@@ -1293,5 +1374,6 @@
   }
   save();
   render();
+  refreshNativePerm();
   window.__rg = { state: function () { return S; }, ui: ui, render: render };
 })();

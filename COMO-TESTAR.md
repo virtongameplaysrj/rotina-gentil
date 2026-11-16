@@ -11,6 +11,8 @@
 | `styles.css` | Cores, tamanhos e aparência. |
 | `manifest.webmanifest`, `sw.js`, `icon-*.png` | Fazem o app poder ser instalado no celular e funcionar sem internet. |
 | `tests.html` | Testes automáticos do cérebro da agenda. Abra para ver se está tudo ✔. |
+| `android/`, `package.json`, `capacitor.config.json`, `scripts/` | Transformam o app em um APK de Android (veja a Parte 4). |
+| `.github/workflows/android.yml` | A "fábrica" do GitHub que monta o APK e publica a Release sozinha. |
 
 ---
 
@@ -85,6 +87,53 @@ Para uso próprio, a Parte 2 já basta.
 
 ---
 
+## Parte 4 — Instalar pelo Obtainium (APK com atualização automática)
+
+O GitHub monta o APK sozinho toda vez que a branch `main` muda e publica em
+**Releases**: https://github.com/virtongameplaysrj/rotina-gentil/releases
+O Obtainium olha essa página e instala/atualiza o app.
+
+### Passo A — Cadastrar a chave de assinatura (uma vez só)
+
+Todo APK precisa ser assinado sempre com a **mesma chave**, senão o Android não aceita a atualização.
+
+1. No GitHub, abra o repositório → **Settings** → **Secrets and variables** → **Actions**.
+2. Clique em **New repository secret** e crie estes 4 (nome exatamente igual, valores do arquivo `SEGREDOS-DO-APK.txt`):
+   - `ANDROID_KEYSTORE_BASE64`
+   - `ANDROID_KEYSTORE_PASSWORD`
+   - `ANDROID_KEY_ALIAS`
+   - `ANDROID_KEY_PASSWORD`
+3. Guarde o `SEGREDOS-DO-APK.txt` e o `rotina-gentil.keystore` num lugar seguro (ex.: Google Drive).
+   **Nunca** coloque esses arquivos dentro do repositório.
+
+### Passo B — Gerar a primeira versão
+
+1. Depois de cadastrar os secrets, vá em **Actions** → **APK Android** → **Run workflow** → **Run workflow**
+   (ou faça qualquer mudança na `main`).
+2. Espere uns 5–10 minutos até aparecer o ✅ verde.
+3. Em **Releases** vai aparecer `Rotina Gentil 1.0.N` com o arquivo `rotina-gentil-v1.0.N.apk`.
+
+### Passo C — Adicionar no Obtainium (no celular)
+
+1. Abra o **Obtainium** → toque em **Adicionar app** (➕).
+2. Em **URL de origem do app**, cole: `https://github.com/virtongameplaysrj/rotina-gentil`
+3. Toque em **Adicionar** e depois em **Instalar**. Se o Android pedir, permita "instalar apps desta fonte" para o Obtainium.
+4. Pronto! Quando sair uma versão nova, o Obtainium avisa e atualiza. Seus dados continuam no celular.
+
+> Na primeira vez que ligar os **lembretes**, o Android vai pedir permissão de notificações: toque em **Permitir**.
+> Os lembretes tocam 10 min antes e na hora de cada atividade, **mesmo com o app fechado**.
+> Em alguns celulares (Xiaomi, Samsung…) vale liberar o app em **Bateria → Sem restrições** para os avisos não atrasarem.
+>
+> **Os dados do APK são separados** dos dados do app pelo Chrome. Para levar seus dados:
+> no app antigo **Ajustes → Salvar cópia**, e no APK **Ajustes → Restaurar cópia**.
+
+### Para quem for mexer no código
+
+- Os arquivos do app continuam na raiz (`app.js`, `styles.css`…). O comando `npm run sync` copia tudo para `www/` e para o projeto Android.
+- Para testar no Android Studio: `npm install`, `npm run sync` e abrir a pasta `android/`.
+
+---
+
 ## Problemas comuns
 
 | Problema | Solução |
@@ -92,4 +141,6 @@ Para uso próprio, a Parte 2 já basta.
 | "Instalar app" não aparece no menu do Chrome | Confira se o endereço começa com `https://`. Recarregue a página e espere uns segundos. |
 | Abri no PC e meus dados sumiram | Você pode ter aberto em outro navegador ou em janela anônima. Use sempre o mesmo navegador. |
 | Quero começar do zero | Ajustes → **Apagar tudo e recomeçar**. |
+| O Obtainium diz que não achou APK | Confira em **Releases** se já existe uma versão. Se o workflow em **Actions** ficou vermelho, veja se os 4 secrets foram criados com o nome certo. |
+| O Android não deixa atualizar ("conflito de pacote") | O APK foi assinado com outra chave. Confira se o secret `ANDROID_KEYSTORE_BASE64` é o mesmo de antes. |
 | Alguma tarefa "não coube" | Adicione horários livres, diminua as vezes por semana, ou aumente o "Máximo de tarefas da casa por dia" em Ajustes. |
